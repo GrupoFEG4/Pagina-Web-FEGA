@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seguimiento de pedido - Grupo FEGA</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #65c6d4;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .contenedor {
+      max-width: 560px;
+      margin: 50px auto;
+      background: #ffffff;
+      padding: 30px;
+      border-radius: 14px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.14);
+      text-align: center;
+    }
+
+    h1 {
+      color: #1f4e79;
+      margin-bottom: 10px;
+    }
+
+    p {
+      color: #555;
+      line-height: 1.5;
+    }
+
+    input {
+      width: 90%;
+      padding: 13px;
+      margin-top: 18px;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      font-size: 16px;
+      text-transform: uppercase;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 13px 26px;
+      background: #1f4e79;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #163a59;
+    }
+
+    .resultado {
+      display: none;
+      text-align: left;
+      margin-top: 25px;
+    }
+
+    .dato {
+      margin: 12px 0;
+      padding: 13px;
+      background: #f0f3f6;
+      border-radius: 8px;
+      line-height: 1.4;
+    }
+
+    .estado {
+      font-size: 20px;
+      font-weight: bold;
+      color: #1f4e79;
+    }
+
+    .error {
+      display: none;
+      margin-top: 25px;
+      padding: 15px;
+      background: #fdeaea;
+      color: #8a0000;
+      border-radius: 8px;
+    }
+
+    .nota {
+      font-size: 13px;
+      color: #777;
+      margin-top: 20px;
+    }
+
+    .cargando {
+      display: none;
+      margin-top: 20px;
+      color: #555;
+    }
+
+    .volver {
+      display: inline-block;
+      margin-top: 25px;
+      color: #1f4e79;
+      text-decoration: none;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="contenedor">
+    <h1>Seguimiento de pedido</h1>
+
+    <p>
+      Ingresa el código proporcionado por Grupo FEGA para consultar el estado actual de tu pedido.
+    </p>
+
+    <form id="formConsulta">
+      <input type="text" id="codigo" placeholder="Ej. FEGA-2025-001" required>
+      <br>
+      <button type="submit">Consultar</button>
+    </form>
+
+    <div id="cargando" class="cargando">
+      Consultando información...
+    </div>
+
+    <div id="error" class="error"></div>
+
+    <div id="resultado" class="resultado">
+      <div class="dato"><strong>Código:</strong> <span id="rCodigo"></span></div>
+      <div class="dato"><strong>Producto:</strong> <span id="rProducto"></span></div>
+      <div class="dato"><strong>Estado actual:</strong> <span id="rEstado" class="estado"></span></div>
+      <div class="dato"><strong>Observaciones:</strong> <span id="rObservaciones"></span></div>
+      <div class="dato"><strong>Última actualización:</strong> <span id="rFecha"></span></div>
+    </div>
+
+    <p class="nota">
+      Este módulo muestra información general del avance del pedido. Para dudas específicas, comunícate por WhatsApp con Grupo FEGA.
+    </p>
+
+    <a class="volver" href="./">Volver al sitio principal</a>
+  </div>
+
+  <script>
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTHiClX9dr7yCoBphjCEN2KcwtILeFb5FCmQT2ZCUvIyeGzleC66JKmoWnUcPSfXVF7MqNXEdB9z1Tc/pub?gid=0&single=true&output=csv';
+
+    const form = document.getElementById('formConsulta');
+    const inputCodigo = document.getElementById('codigo');
+    const divResultado = document.getElementById('resultado');
+    const divError = document.getElementById('error');
+    const divCargando = document.getElementById('cargando');
+
+    form.addEventListener('submit', async function(event) {
+      event.preventDefault();
+
+      const codigoBuscado = inputCodigo.value.trim().toUpperCase();
+
+      limpiarPantalla();
+
+      if (!codigoBuscado) {
+        mostrarError('Ingresa un código de pedido válido.');
+        return;
+      }
+
+      divCargando.style.display = 'block';
+
+      try {
+        const pedidos = await obtenerPedidos();
+        const pedido = pedidos.find(p => String(p.codigo || '').trim().toUpperCase() === codigoBuscado);
+
+        divCargando.style.display = 'none';
+
+        if (!pedido) {
+          mostrarError('No se encontró información para el código ingresado. Verifica el código o comunícate con Grupo FEGA.');
+          return;
+        }
+
+        mostrarPedido(pedido);
+
+      } catch (error) {
+        divCargando.style.display = 'none';
+        mostrarError('No fue posible consultar la información en este momento. Intenta nuevamente más tarde.');
+        console.error(error);
+      }
+    });
+
+    async function obtenerPedidos() {
+      const respuesta = await fetch(CSV_URL);
+
+      if (!respuesta.ok) {
+        throw new Error('No se pudo cargar el archivo CSV.');
+      }
+
+      const textoCSV = await respuesta.text();
+      return convertirCSV(textoCSV);
+    }
+
+    function convertirCSV(texto) {
+      const filas = texto.trim().split(/\r?\n/).map(fila => parsearCSV(fila));
+
+      if (filas.length < 2) {
+        return [];
+      }
+
+      const encabezados = filas[0].map(h => normalizarEncabezado(h));
+
+      return filas.slice(1).map(fila => {
+        const pedido = {};
+
+        encabezados.forEach((encabezado, index) => {
+          pedido[encabezado] = fila[index] ? fila[index].trim() : '';
+        });
+
+        return pedido;
+      });
+    }
+
+    function parsearCSV(fila) {
+      const resultado = [];
+      let valor = '';
+      let dentroComillas = false;
+
+      for (let i = 0; i < fila.length; i++) {
+        const caracter = fila[i];
+
+        if (caracter === '"' && fila[i + 1] === '"') {
+          valor += '"';
+          i++;
+        } else if (caracter === '"') {
+          dentroComillas = !dentroComillas;
+        } else if (caracter === ',' && !dentroComillas) {
+          resultado.push(valor);
+          valor = '';
+        } else {
+          valor += caracter;
+        }
+      }
+
+      resultado.push(valor);
+      return resultado;
+    }
+
+    function normalizarEncabezado(texto) {
+      return texto
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[áàäâ]/g, 'a')
+        .replace(/[éèëê]/g, 'e')
+        .replace(/[íìïî]/g, 'i')
+        .replace(/[óòöô]/g, 'o')
+        .replace(/[úùüû]/g, 'u');
+    }
+
+    function mostrarPedido(pedido) {
+      document.getElementById('rCodigo').textContent = pedido.codigo || 'Sin dato';
+      document.getElementById('rProducto').textContent = pedido.producto || 'Sin dato';
+      document.getElementById('rEstado').textContent = pedido.estado || 'Sin dato';
+      document.getElementById('rObservaciones').textContent = pedido.observaciones || 'Sin observaciones';
+      document.getElementById('rFecha').textContent = pedido.fecha_actualizacion || 'Sin fecha';
+
+      divResultado.style.display = 'block';
+    }
+
+    function mostrarError(mensaje) {
+      divError.textContent = mensaje;
+      divError.style.display = 'block';
+    }
+
+    function limpiarPantalla() {
+      divResultado.style.display = 'none';
+      divError.style.display = 'none';
+      divCargando.style.display = 'none';
+    }
+  </script>
+</body>
+</html>
